@@ -27,7 +27,7 @@ def run_etl():
         
     engine = create_engine(DATABASE_URL)
     tickers = list(ASSETS.keys())
-    data = yf.download(tickers, period="1y")['Adj Close']
+    data = yf.download(tickers, period="1y")['Close']
     data = data.ffill().bfill()
     
     daily_returns = data.pct_change().dropna()
