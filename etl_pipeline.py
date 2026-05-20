@@ -1,0 +1,70 @@
+import os
+import yfinance as yf
+import pandas as pd
+from datetime import datetime
+from sqlalchemy import create_engine
+
+ASSETS = {
+    '2330.TW': {'name': '台積電', 'weight': 0.20, 'market': 'TW'},
+    '2308.TW': {'name': '台達電', 'weight': 0.10, 'market': 'TW'},
+    '2383.TW': {'name': '台光電', 'weight': 0.10, 'market': 'TW'},
+    '3711.TW': {'name': '日月光投控', 'weight': 0.10, 'market': 'TW'},
+    '3081.TW': {'name': '聯亞', 'weight': 0.10, 'market': 'TW'},
+    'NVDA': {'name': 'Nvidia', 'weight': 0.20, 'market': 'US'},
+    'COHR': {'name': 'Coherent', 'weight': 0.10, 'market': 'US'},
+    'LITE': {'name': 'Lumentum', 'weight': 0.10, 'market': 'US'},
+    'AMKR': {'name': 'Amkor', 'weight': 0.10, 'market': 'US'}
+}
+
+def run_etl():
+    print(f"[{datetime.now()}] 啟動 ETL 資料管道...")
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    if not DATABASE_URL:
+        raise ValueError("未偵測到 DATABASE_URL 環境變數！")
+    
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        
+    engine = create_engine(DATABASE_URL)
+    tickers = list(ASSETS.keys())
+    data = yf.download(tickers, period="1y")['Adj Close']
+    data = data.ffill().bfill()
+    
+    daily_returns = data.pct_change().dropna()
+    portfolio_daily_return = pd.Series(0, index=daily_returns.index)
+    for ticker, info in ASSETS.items():
+        portfolio_daily_return += daily_returns[ticker] * info['weight']
+        
+    portfolio_cum_return = (1 + portfolio_daily_return).cumprod() - 1
+    history_df = pd.DataFrame({'portfolio_return': portfolio_cum_return}).reset_index()
+    history_df['Date'] = history_df['Date'].dt.strftime('%Y-%m-%d')
+    
+    latest_rows = []
+    for ticker, info in ASSETS.items():
+        t = yf.Ticker(ticker)
+        hist = t.history(period="2d")
+        if len(hist) >= 2:
+            current_price = hist['Close'].iloc[-1]
+            prev_price = hist['Close'].iloc[-2]
+            daily_chg = ((current_price - prev_price) / prev_price) * 100
+        else:
+            current_price = t.info.get('regularMarketPrice', 0)
+            daily_chg = t.info.get('regularMarketChangePercent', 0)
+            
+        latest_rows.append({
+            'ticker': ticker,
+            'name': info['name'],
+            'market': info['market'],
+            'weight': info['weight'] * 100,
+            'current_price': round(current_price, 2),
+            'daily_change_pct': round(daily_chg, 2),
+            'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+        
+    latest_df = pd.DataFrame(latest_rows)
+    history_df.to_sql('portfolio_history', engine, if_exists='replace', index=False)
+    latest_df.to_sql('asset_latest', engine, if_exists='replace', index=False)
+    print("ETL 執行成功，資料已同步至雲端資料庫。")
+
+if __name__ == "__main__":
+    run_etl()
