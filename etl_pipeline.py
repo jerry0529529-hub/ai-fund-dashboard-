@@ -9,7 +9,7 @@ ASSETS = {
     '2308.TW': {'name': '台達電', 'weight': 0.10, 'market': 'TW'},
     '2383.TW': {'name': '台光電', 'weight': 0.10, 'market': 'TW'},
     '3711.TW': {'name': '日月光投控', 'weight': 0.10, 'market': 'TW'},
-    '3081.TW': {'name': '聯亞', 'weight': 0.10, 'market': 'TW'},
+    '3081.TWO': {'name': '聯亞', 'weight': 0.10, 'market': 'TW'},
     'NVDA': {'name': 'Nvidia', 'weight': 0.20, 'market': 'US'},
     'COHR': {'name': 'Coherent', 'weight': 0.10, 'market': 'US'},
     'LITE': {'name': 'Lumentum', 'weight': 0.10, 'market': 'US'},
