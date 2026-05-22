@@ -48,9 +48,12 @@ try:
     
     styled_df = df_latest[['ticker', 'name', 'market', 'weight', 'current_price', 'daily_change_pct']].copy()
     styled_df.columns = ['代號', '資產名稱', '市場', '配置權重 (%)', '當前價格', '今日漲跌幅 (%)']
+    
+    # 這裡已經幫你把 columns 改成正確的 subset 了！
     st.dataframe(styled_df.style.format({
         '配置權重 (%)': '{:.1f}%', '當前價格': '${:.2f}', '今日漲跌幅 (%)': '{:+.2f}%'
-    }).highlight_max(axis=0, columns=['今日漲跌幅 (%)'], color='#D4EDDA'), use_container_width=True)
+    }).highlight_max(axis=0, subset=['今日漲跌幅 (%)'], color='#D4EDDA'), use_container_width=True)
 
 except Exception as e:
-    st.error(f"請等待資料庫初始化或確認連線設定。")
+    # 把隱藏的錯誤訊息印出來，這樣萬一以後改錯字才抓得到蟲
+    st.error(f"哎呀！出現了隱藏錯誤：{e}")
