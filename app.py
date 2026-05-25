@@ -17,6 +17,13 @@ try:
     df_history = pd.read_sql("SELECT * FROM portfolio_history ORDER BY \"Date\" ASC", engine)
     df_latest = pd.read_sql("SELECT * FROM asset_latest", engine)
     
+    # --- 🛡️ 數據防彈裝甲：強制轉換型別，並把空值變成 0，防止網頁當機 ---
+    df_history['portfolio_return'] = pd.to_numeric(df_history['portfolio_return'], errors='coerce').fillna(0)
+    df_latest['daily_change_pct'] = pd.to_numeric(df_latest['daily_change_pct'], errors='coerce').fillna(0)
+    df_latest['weight'] = pd.to_numeric(df_latest['weight'], errors='coerce').fillna(0)
+    df_latest['current_price'] = pd.to_numeric(df_latest['current_price'], errors='coerce').fillna(0)
+    # -----------------------------------------------------------------
+
     st.title("🚀 實時收益儀表板")
     st.caption(f"數據最後自動更新時間： {df_latest['updated_at'].iloc[0]}")
     
