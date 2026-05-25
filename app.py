@@ -5,18 +5,6 @@ import yfinance as yf
 
 st.set_page_config(page_title="實時收益儀表板", layout="wide")
 
-# --- 🌟 新增：自動抓取並記憶公司名稱的快取魔法函數 ---
-@st.cache_data
-def get_company_name(ticker):
-    try:
-        info = yf.Ticker(ticker).info
-        # 優先抓簡稱，沒有就抓全名，如果都抓不到就退回顯示代號
-        name = info.get('shortName') or info.get('longName') or ticker
-        return name
-    except:
-        return ticker
-# ---------------------------------------------------
-
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = {
         '2887.TW': 4570,
@@ -45,8 +33,7 @@ with col_btn:
     if st.button("➕ 新增 / 更新持股配置"):
         if input_ticker:
             st.session_state.portfolio[input_ticker] = input_shares
-            c_name = get_company_name(input_ticker)
-            st.toast(f"成功加入 {c_name} ({input_ticker}) 共 {input_shares:,} 股！")
+            st.toast(f"成功加入 {input_ticker} 共 {input_shares:,} 股！")
             st.rerun()
 
 if st.session_state.portfolio:
@@ -56,8 +43,7 @@ if st.session_state.portfolio:
         cols = st.columns(3)
         for j, (ticker, shares) in enumerate(portfolio_items[i:i+3]):
             with cols[j]:
-                c_name = get_company_name(ticker) # 這裡也會顯示公司名稱
-                st.write(f"🔹 **{c_name}** ({ticker}) : {shares:,} 股")
+                st.write(f"🔹 **{ticker}** : {shares:,} 股")
                 if st.button(f"❌ 刪除 {ticker}", key=f"del_{ticker}"):
                     del st.session_state.portfolio[ticker]
                     st.rerun()
@@ -65,34 +51,36 @@ else:
     st.info("💡 目前無任何股票，請在上方建立你的資產配置！")
 
 
-# ================= 區塊二：多幣別即時數據與匯率換算 =================
+# ================= 區塊二：多幣別即時數據與大盤基準對決 =================
 if st.session_state.portfolio:
     st.markdown("---")
     tickers = list(st.session_state.portfolio.keys())
     
     try:
-        with st.spinner("正在同步跨國行情、擷取公司名稱，並進行回測..."):
+        with st.spinner("正在同步跨國行情、抓取台灣大盤基準，並進行回測..."):
             
+            # --- 1. 抓取即時匯率 ---
             fx_ticker = yf.Ticker("USDTWD=X")
             fx_data = fx_ticker.history(period="5d")
             usd_to_twd = float(fx_data['Close'].iloc[-1])
             
+            # --- 2. 抓取股票行情 (包含台灣大盤 ^TWII) ---
             raw_latest = yf.download(tickers, period="5d")['Close']
-            raw_hist = yf.download(tickers, period="1y")['Close']
+            # 在抓歷史數據時，偷偷把台灣大盤加進去一起抓
+            raw_hist = yf.download(tickers + ['^TWII'], period="1y")['Close']
             
             raw_latest = raw_latest.ffill().bfill()
             raw_hist = raw_hist.ffill().bfill()
             
             if len(tickers) == 1:
                 df_latest_close = pd.DataFrame({tickers[0]: raw_latest})
-                df_hist_close = pd.DataFrame({tickers[0]: raw_hist})
             else:
                 df_latest_close = raw_latest
-                df_hist_close = raw_hist
                 
             latest_prices = df_latest_close.iloc[-1].to_dict()
             prev_prices = df_latest_close.iloc[-2].to_dict() if len(df_latest_close) > 1 else latest_prices
             
+            # --- 3. 跨幣別資產計算引擎 ---
             portfolio_values_twd = {}
             total_market_value_twd = 0
             latest_rows = []
@@ -102,7 +90,6 @@ if st.session_state.portfolio:
                 raw_price = latest_prices[t]
                 prev_price = prev_prices[t]
                 daily_chg = ((raw_price - prev_price) / prev_price) * 100
-                c_name = get_company_name(t) # 取得公司名稱
                 
                 if t.endswith('.TW') or t.endswith('.TWO'):
                     currency = "TWD"
@@ -117,7 +104,6 @@ if st.session_state.portfolio:
                 
                 latest_rows.append({
                     '代號': t,
-                    '公司名稱': c_name, # 寫入資料表
                     '幣別': currency,
                     '原始單價': raw_price,
                     '台幣總市值 (TWD)': val_twd,
@@ -131,25 +117,36 @@ if st.session_state.portfolio:
                 
             df_latest_summary = pd.DataFrame(latest_rows)
             
-            daily_returns = df_hist_close.pct_change(fill_method=None).fillna(0)
-            portfolio_daily_return = pd.Series(0, index=daily_returns.index)
+            # --- 4. 雙軌歷史回測運算 (投資組合 vs 大盤) ---
+            # 計算投資組合的累積報酬
+            portfolio_daily_returns = raw_hist[tickers].pct_change(fill_method=None).fillna(0)
+            portfolio_daily_return = pd.Series(0, index=portfolio_daily_returns.index)
             for t in tickers:
-                portfolio_daily_return += daily_returns[t] * weights[t]
-                
+                portfolio_daily_return += portfolio_daily_returns[t] * weights[t]
             portfolio_cum_return = (1 + portfolio_daily_return).cumprod() - 1
-            df_history_plot = pd.DataFrame({'portfolio_return': portfolio_cum_return})
+            
+            # 計算台灣大盤的累積報酬
+            benchmark_daily_return = raw_hist['^TWII'].pct_change(fill_method=None).fillna(0)
+            benchmark_cum_return = (1 + benchmark_daily_return).cumprod() - 1
+            
+            # 將兩條線合併成同一張資料表
+            df_history_plot = pd.DataFrame({
+                '我的投資組合': portfolio_cum_return,
+                '台灣大盤 (TAIEX)': benchmark_cum_return
+            })
             df_history_plot.index.name = 'Date'
             df_history_plot = df_history_plot.reset_index()
             df_history_plot['Date'] = df_history_plot['Date'].dt.strftime('%Y-%m-%d')
             
         # ================= 區塊三：大面板數據渲染 =================
-        total_return_pct = df_history_plot['portfolio_return'].iloc[-1] * 100
+        total_return_pct = df_history_plot['我的投資組合'].iloc[-1] * 100
+        benchmark_return_pct = df_history_plot['台灣大盤 (TAIEX)'].iloc[-1] * 100
         avg_daily_chg = df_latest_summary['今日漲跌幅 (%)'].mean()
         
         st.caption(f"💱 系統即時匯率：1 USD = **{usd_to_twd:.2f}** TWD")
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("歷史累積報酬率 (現場回測)", f"{total_return_pct:.2f} %")
+        col1.metric("組合累積報酬率", f"{total_return_pct:.2f} %", f"勝過大盤 {(total_return_pct - benchmark_return_pct):.2f}%" if total_return_pct > benchmark_return_pct else f"落後大盤 {(total_return_pct - benchmark_return_pct):.2f}%")
         col2.metric("成分股今日平均漲跌", f"{avg_daily_chg:.2f} %")
         col3.metric("目前資產總市值 (台幣)", f"NT$ {total_market_value_twd:,.0f}")
         
@@ -157,23 +154,33 @@ if st.session_state.portfolio:
         left_col, right_col = st.columns([2, 1])
         
         with left_col:
-            st.subheader("📈 組合淨值累積走勢 (過去一年)")
-            fig_line = px.line(df_history_plot, x='Date', y='portfolio_return', title="動態回測績效曲線")
-            fig_line.update_traces(line_color='#00CC96', line_width=2.5)
+            st.subheader("📈 組合績效 vs 台灣大盤 (過去一年)")
+            # 畫出雙線對決圖
+            fig_line = px.line(
+                df_history_plot, 
+                x='Date', 
+                y=['我的投資組合', '台灣大盤 (TAIEX)'], 
+                title="打敗大盤 (Alpha) 檢驗"
+            )
+            # 設定兩條線的顏色 (主觀綠色 vs 大盤灰色)
+            fig_line.update_traces(line_width=2.5)
+            fig_line.update_layout(
+                yaxis_title='累積報酬率', 
+                legend_title_text='比較基準',
+                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01) # 把圖例塞進圖表左上角省空間
+            )
             st.plotly_chart(fig_line, use_container_width=True)
             
         with right_col:
             st.subheader("🍕 即時戰略資產權重")
-            # 讓圓餅圖的標籤顯示「公司名稱」
-            fig_pie = px.pie(df_latest_summary, values='配置權重 (%)', names='公司名稱', title='即時配置權重比重')
+            fig_pie = px.pie(df_latest_summary, values='配置權重 (%)', names='代號', title='即時配置權重比重')
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
             
         st.markdown("---")
         st.subheader("🔍 核心持股最新行情與資產估值")
         
-        # 將「公司名稱」加入要顯示的表格欄位中
-        display_df = df_latest_summary[['代號', '公司名稱', '幣別', '配置權重 (%)', '原始單價', '今日漲跌幅 (%)', '持有股數', '台幣總市值 (TWD)']]
+        display_df = df_latest_summary[['代號', '幣別', '配置權重 (%)', '原始單價', '今日漲跌幅 (%)', '持有股數', '台幣總市值 (TWD)']]
         
         st.dataframe(display_df.style.format({
             '配置權重 (%)': '{:.1f}%', '原始單價': '{:.2f}', '今日漲跌幅 (%)': '{:+.2f}%',
