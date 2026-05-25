@@ -44,15 +44,15 @@ def run_etl():
     data = yf.download(tickers, period="1y")['Close']
     data = data.ffill().bfill()
     
-    daily_returns = data.pct_change().dropna()
+   daily_returns = data.pct_change(fill_method=None).fillna(0)
     portfolio_daily_return = pd.Series(0, index=daily_returns.index)
     for ticker, info in ASSETS.items():
         portfolio_daily_return += daily_returns[ticker] * info['weight']
         
     portfolio_cum_return = (1 + portfolio_daily_return).cumprod() - 1
-    history_df = pd.DataFrame({'portfolio_return': portfolio_cum_return}).reset_index()
-    history_df['Date'] = history_df['Date'].dt.strftime('%Y-%m-%d')
-    
+    history_df.index.name = 'Date'
+history_df = history_df.reset_index()
+
     latest_rows = []
     for ticker, info in ASSETS.items():
         t = yf.Ticker(ticker)
