@@ -14,9 +14,8 @@ ASSETS = {
     '2412.TW': {'name': '中華電', 'shares': 10, 'market': 'TW'}
 }
 
-# 2. 自動將股數轉換為權重的魔法區塊 (讓後續的 ETL 程式不會出錯)
+# 2. 自動將股數轉換為權重的魔法區塊
 try:
-    import yfinance as yf
     tickers = list(ASSETS.keys())
     # 偷偷去抓今天的最新價格
     latest_data = yf.download(tickers, period="5d")['Close']
@@ -30,6 +29,7 @@ try:
         ASSETS[t]['weight'] = float((ASSETS[t]['shares'] * latest_prices[t]) / total_value)
 except Exception as e:
     print(f"自動計算權重時發生錯誤: {e}")
+
 def run_etl():
     print(f"[{datetime.now()}] 啟動 ETL 資料管道...")
     DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -41,18 +41,27 @@ def run_etl():
         
     engine = create_engine(DATABASE_URL)
     tickers = list(ASSETS.keys())
+    
+    # 抓取過去一年的歷史資料
     data = yf.download(tickers, period="1y")['Close']
     data = data.ffill().bfill()
     
-   daily_returns = data.pct_change(fill_method=None).fillna(0)
+    # 計算每日報酬率 (fill_method=None 解決警告，fillna(0) 保護資料不斷連)
+    daily_returns = data.pct_change(fill_method=None).fillna(0)
     portfolio_daily_return = pd.Series(0, index=daily_returns.index)
+    
     for ticker, info in ASSETS.items():
         portfolio_daily_return += daily_returns[ticker] * info['weight']
         
     portfolio_cum_return = (1 + portfolio_daily_return).cumprod() - 1
+    
+    # 將回測結果建立成 DataFrame
+    history_df = pd.DataFrame({'portfolio_return': portfolio_cum_return})
     history_df.index.name = 'Date'
-history_df = history_df.reset_index()
+    history_df = history_df.reset_index()
+    history_df['Date'] = history_df['Date'].dt.strftime('%Y-%m-%d')
 
+    # 抓取最新報價與漲跌幅
     latest_rows = []
     for ticker, info in ASSETS.items():
         t = yf.Ticker(ticker)
@@ -76,6 +85,8 @@ history_df = history_df.reset_index()
         })
         
     latest_df = pd.DataFrame(latest_rows)
+    
+    # 寫入資料庫
     history_df.to_sql('portfolio_history', engine, if_exists='replace', index=False)
     latest_df.to_sql('asset_latest', engine, if_exists='replace', index=False)
     print("ETL 執行成功，資料已同步至雲端資料庫。")
