@@ -3,7 +3,9 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import create_engine
 
-st.set_page_config(page_title="台美 AI 雙擎基金監控後台", layout="wide")
+st.set_page_config(page_title="實時收益儀表板", layout="wide")
+# ...(中間省略)...
+st.title("🚀 實時收益儀表板")
 
 @st.cache_resource
 def get_db_engine():
