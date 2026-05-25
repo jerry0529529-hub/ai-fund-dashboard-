@@ -8,7 +8,6 @@ from sqlalchemy import create_engine
 ASSETS = {
     '2887.TW': {'name': '台新新光金', 'shares': 4570, 'market': 'TW'},
     '6757.TW': {'name': '台灣虎航', 'shares': 1000, 'market': 'TW'},
-    '00679B.TW': {'name': '元大美債20年', 'shares': 2000, 'market': 'TW'},
     '8069.TWO': {'name': '元太', 'shares': 200, 'market': 'TW'},
     '1773.TW': {'name': '勝一', 'shares': 100, 'market': 'TW'},
     '3293.TWO': {'name': '鈊象', 'shares': 20, 'market': 'TW'},
