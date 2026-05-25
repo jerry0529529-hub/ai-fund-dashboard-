@@ -8,7 +8,6 @@ st.set_page_config(page_title="實時收益儀表板", layout="wide")
 
 # 1. 初始化網頁記憶體 (Session State) 用來儲存使用者的動態資產配置
 if 'portfolio' not in st.session_state:
-    # 預設幫你帶入你先前的真實持股作為初始範本，你隨時可以在網頁上修改或刪除它們！
     st.session_state.portfolio = {
         '2887.TW': 4570,   # 台新新光金
         '6757.TW': 1000,   # 台灣虎航
@@ -42,13 +41,11 @@ with col_btn:
 # 渲染目前持股的標籤與刪除按鈕
 if st.session_state.portfolio:
     st.markdown("#### 📋 目前投資組合內容")
-    # 每行顯示 3 檔股票的管理介面
     portfolio_items = list(st.session_state.portfolio.items())
     for i in range(0, len(portfolio_items), 3):
         cols = st.columns(3)
         for j, (ticker, shares) in enumerate(portfolio_items[i:i+3]):
             with cols[j]:
-                # 建立一個乾淨的管理小列
                 st.write(f"🔹 **{ticker}** : {shares:,} 股")
                 if st.button(f"❌ 刪除 {ticker}", key=f"del_{ticker}"):
                     del st.session_state.portfolio[ticker]
@@ -68,11 +65,9 @@ if st.session_state.portfolio:
             raw_latest = yf.download(tickers, period="5d")['Close']
             raw_hist = yf.download(tickers, period="1y")['Close']
             
-            # 補值防呆機制
             raw_latest = raw_latest.ffill().bfill()
             raw_hist = raw_hist.ffill().bfill()
             
-            # 防呆型別轉換：確保單檔股票與多檔股票在 Pandas 裡面的結構一致
             if len(tickers) == 1:
                 df_latest_close = pd.DataFrame({tickers[0]: raw_latest})
                 df_hist_close = pd.DataFrame({tickers[0]: raw_hist})
@@ -80,11 +75,9 @@ if st.session_state.portfolio:
                 df_latest_close = raw_latest
                 df_hist_close = raw_hist
                 
-            # 提取最新市價與昨日收盤價
             latest_prices = df_latest_close.iloc[-1].to_dict()
             prev_prices = df_latest_close.iloc[-2].to_dict() if len(df_latest_close) > 1 else latest_prices
             
-            # 計算當前總市值
             portfolio_values = {}
             total_market_value = 0
             for t in tickers:
@@ -94,10 +87,8 @@ if st.session_state.portfolio:
                 portfolio_values[t] = val
                 total_market_value += val
                 
-            # 計算即時配置權重
             weights = {t: portfolio_values[t] / total_market_value for t in tickers}
             
-            # 建立最新行情表 DataFrame
             latest_rows = []
             for t in tickers:
                 shares = st.session_state.portfolio[t]
@@ -115,21 +106,25 @@ if st.session_state.portfolio:
                 })
             df_latest_summary = pd.DataFrame(latest_rows)
             
-            # 現場進行動態歷史投資組合回測
             daily_returns = df_hist_close.pct_change(fill_method=None).fillna(0)
             portfolio_daily_return = pd.Series(0, index=daily_returns.index)
             for t in tickers:
                 portfolio_daily_return += daily_returns[t] * weights[t]
                 
             portfolio_cum_return = (1 + portfolio_daily_return).cumprod() - 1
-            df_history_plot = pd.DataFrame({'portfolio_return': portfolio_cum_return}).reset_index()
+            
+            # --- 🛡️ 修復 Bug 的防護罩就在這三行 ---
+            df_history_plot = pd.DataFrame({'portfolio_return': portfolio_cum_return})
+            df_history_plot.index.name = 'Date'  # 強制將索引命名為 Date
+            df_history_plot = df_history_plot.reset_index()
+            # --------------------------------------
+            
             df_history_plot['Date'] = df_history_plot['Date'].dt.strftime('%Y-%m-%d')
             
         # ================= 區塊三：大面板數據渲染 =================
         total_return_pct = df_history_plot['portfolio_return'].iloc[-1] * 100
         avg_daily_chg = df_latest_summary['今日漲跌幅 (%)'].mean()
         
-        # 頂部三大指標
         col1, col2, col3 = st.columns(3)
         col1.metric("歷史累積報酬率 (現場回測)", f"{total_return_pct:.2f} %")
         col2.metric("成分股今日平均漲跌", f"{avg_daily_chg:.2f} %")
