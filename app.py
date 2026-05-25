@@ -5,15 +5,10 @@ import yfinance as yf
 
 st.set_page_config(page_title="實時收益儀表板", layout="wide")
 
+# --- 🌟 核心修改：初始化網頁記憶體為完全空白的字典 ---
 if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = {
-        '2887.TW': 4570,
-        '6757.TW': 1000,
-        '8069.TWO': 200,
-        '1773.TW': 100,
-        '3293.TWO': 20,
-        '2412.TW': 10
-    }
+    st.session_state.portfolio = {}
+# ---------------------------------------------------
 
 st.title("🚀 實時收益儀表板")
 st.caption("這是一個完全由網頁即時驅動、零資料庫的多幣別動態量化投資組合看板。")
@@ -48,7 +43,7 @@ if st.session_state.portfolio:
                     del st.session_state.portfolio[ticker]
                     st.rerun()
 else:
-    st.info("💡 目前無任何股票，請在上方建立你的資產配置！")
+    st.info("💡 目前投資組合內沒有任何股票。請在上方輸入股票代號與股數（例如美股：NVDA、台股：2330.TW），為你的量化儀表板注入第一筆資產吧！")
 
 
 # ================= 區塊二：多幣別即時數據與大盤基準對決 =================
@@ -71,7 +66,7 @@ if st.session_state.portfolio:
             raw_latest = raw_latest.ffill().bfill()
             raw_hist = raw_hist.ffill().bfill()
             
-            # --- 🛠️ 終極防呆：自動判斷 yfinance 回傳的是 Series 還是 DataFrame ---
+            # --- 自動判斷 yfinance 回傳結構 (Series 轉 DataFrame 防呆) ---
             if isinstance(raw_latest, pd.Series):
                 df_latest_close = pd.DataFrame({tickers[0]: raw_latest})
             else:
@@ -81,7 +76,6 @@ if st.session_state.portfolio:
                 df_hist_close = pd.DataFrame({tickers[0]: raw_hist})
             else:
                 df_hist_close = raw_hist
-            # -----------------------------------------------------------------
                 
             latest_prices = df_latest_close.iloc[-1].to_dict()
             prev_prices = df_latest_close.iloc[-2].to_dict() if len(df_latest_close) > 1 else latest_prices
@@ -126,7 +120,6 @@ if st.session_state.portfolio:
             # --- 4. 雙軌歷史回測運算 (投資組合 vs 大盤) ---
             portfolio_daily_returns = df_hist_close[tickers].pct_change(fill_method=None).fillna(0)
             
-            # 如果只剩一檔股票，要確保它被當成 DataFrame 的欄位來算
             if isinstance(portfolio_daily_returns, pd.Series):
                 portfolio_daily_returns = pd.DataFrame({tickers[0]: portfolio_daily_returns})
                 
