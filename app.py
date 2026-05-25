@@ -59,9 +59,11 @@ if st.session_state.portfolio:
     try:
         with st.spinner("正在同步跨國行情與即時匯率 (USD/TWD)，並進行回測..."):
             
-            # --- 💱 1. 抓取即時匯率 ---
-            fx_data = yf.download("USDTWD=X", period="5d")['Close']
-            usd_to_twd = float(fx_data.ffill().iloc[-1])
+            # --- 💱 1. 抓取即時匯率 (修正 Bug：改用嚴謹的 Ticker 語法，確保回傳純數值) ---
+            fx_ticker = yf.Ticker("USDTWD=X")
+            fx_data = fx_ticker.history(period="5d")
+            usd_to_twd = float(fx_data['Close'].iloc[-1])
+            # -------------------------------------------------------------------------
             
             # --- 📈 2. 抓取股票行情 ---
             raw_latest = yf.download(tickers, period="5d")['Close']
@@ -112,7 +114,6 @@ if st.session_state.portfolio:
                     '持有股數': shares
                 })
                 
-            # 計算精準的統一幣別權重
             weights = {t: portfolio_values_twd[t] / total_market_value_twd for t in tickers}
             for row in latest_rows:
                 row['配置權重 (%)'] = weights[row['代號']] * 100
@@ -160,7 +161,6 @@ if st.session_state.portfolio:
         st.markdown("---")
         st.subheader("🔍 核心持股最新行情與資產估值")
         
-        # 重新排版表格讓幣別顯示更清楚
         display_df = df_latest_summary[['代號', '幣別', '配置權重 (%)', '原始單價', '今日漲跌幅 (%)', '持有股數', '台幣總市值 (TWD)']]
         
         st.dataframe(display_df.style.format({
