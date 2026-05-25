@@ -2,23 +2,21 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import yfinance as yf
-from datetime import datetime
 
 st.set_page_config(page_title="實時收益儀表板", layout="wide")
 
-# 1. 初始化網頁記憶體 (Session State) 用來儲存使用者的動態資產配置
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = {
-        '2887.TW': 4570,   # 台新新光金
-        '6757.TW': 1000,   # 台灣虎航
-        '8069.TWO': 200,   # 元太
-        '1773.TW': 100,    # 勝一
-        '3293.TWO': 20,    # 鈊象
-        '2412.TW': 10      # 中華電
+        '2887.TW': 4570,
+        '6757.TW': 1000,
+        '8069.TWO': 200,
+        '1773.TW': 100,
+        '3293.TWO': 20,
+        '2412.TW': 10
     }
 
 st.title("🚀 實時收益儀表板")
-st.caption("這是一個完全由網頁即時驅動、零資料庫的動態量化投資組合看板。")
+st.caption("這是一個完全由網頁即時驅動、零資料庫的多幣別動態量化投資組合看板。")
 
 # ================= 區塊一：投資組合自主管理中心 =================
 st.markdown("---")
@@ -26,19 +24,18 @@ st.subheader("🛠️ 持股動態管理後台")
 
 col_in1, col_in2, col_btn = st.columns([3, 2, 2])
 with col_in1:
-    input_ticker = st.text_input("輸入股票代號 (上市加 .TW / 上櫃加 .TWO，如：2330.TW, NVDA)：", "").upper().strip()
+    input_ticker = st.text_input("輸入股票代號 (台股加 .TW / .TWO，美股直打 NVDA)：", "").upper().strip()
 with col_in2:
     input_shares = st.number_input("輸入持有股數：", min_value=1, value=1000, step=100)
 with col_btn:
-    st.write("") # 排版對齊用
+    st.write("") 
     st.write("")
     if st.button("➕ 新增 / 更新持股配置"):
         if input_ticker:
             st.session_state.portfolio[input_ticker] = input_shares
-            st.toast(f"成功加入/更新 {input_ticker} 共 {input_shares:,} 股！")
+            st.toast(f"成功加入 {input_ticker} 共 {input_shares:,} 股！")
             st.rerun()
 
-# 渲染目前持股的標籤與刪除按鈕
 if st.session_state.portfolio:
     st.markdown("#### 📋 目前投資組合內容")
     portfolio_items = list(st.session_state.portfolio.items())
@@ -51,17 +48,22 @@ if st.session_state.portfolio:
                     del st.session_state.portfolio[ticker]
                     st.rerun()
 else:
-    st.info("💡 目前投資組合內沒有任何股票，請在上方輸入代號與股數來建立你的資產配置！")
+    st.info("💡 目前無任何股票，請在上方建立你的資產配置！")
 
 
-# ================= 區塊二：即時金融數據抓取與量化計算 =================
+# ================= 區塊二：多幣別即時數據與匯率換算 =================
 if st.session_state.portfolio:
     st.markdown("---")
     tickers = list(st.session_state.portfolio.keys())
     
     try:
-        with st.spinner("正在跟 Yahoo Finance 即時同步行情並現場進行 1 年期歷史回測..."):
-            # 抓取報價數據
+        with st.spinner("正在同步跨國行情與即時匯率 (USD/TWD)，並進行回測..."):
+            
+            # --- 💱 1. 抓取即時匯率 ---
+            fx_data = yf.download("USDTWD=X", period="5d")['Close']
+            usd_to_twd = float(fx_data.ffill().iloc[-1])
+            
+            # --- 📈 2. 抓取股票行情 ---
             raw_latest = yf.download(tickers, period="5d")['Close']
             raw_hist = yf.download(tickers, period="1y")['Close']
             
@@ -78,57 +80,67 @@ if st.session_state.portfolio:
             latest_prices = df_latest_close.iloc[-1].to_dict()
             prev_prices = df_latest_close.iloc[-2].to_dict() if len(df_latest_close) > 1 else latest_prices
             
-            portfolio_values = {}
-            total_market_value = 0
-            for t in tickers:
-                shares = st.session_state.portfolio[t]
-                price = latest_prices[t]
-                val = shares * price
-                portfolio_values[t] = val
-                total_market_value += val
-                
-            weights = {t: portfolio_values[t] / total_market_value for t in tickers}
-            
+            # --- 🧮 3. 跨幣別資產計算引擎 ---
+            portfolio_values_twd = {}
+            total_market_value_twd = 0
             latest_rows = []
+            
             for t in tickers:
                 shares = st.session_state.portfolio[t]
-                price = latest_prices[t]
+                raw_price = latest_prices[t]
                 prev_price = prev_prices[t]
-                daily_chg = ((price - prev_price) / prev_price) * 100
+                daily_chg = ((raw_price - prev_price) / prev_price) * 100
+                
+                # 自動判斷幣別並換算成台幣
+                if t.endswith('.TW') or t.endswith('.TWO'):
+                    currency = "TWD"
+                    price_twd = raw_price
+                else:
+                    currency = "USD"
+                    price_twd = raw_price * usd_to_twd
+                
+                val_twd = shares * price_twd
+                portfolio_values_twd[t] = val_twd
+                total_market_value_twd += val_twd
                 
                 latest_rows.append({
                     '代號': t,
-                    '配置權重 (%)': weights[t] * 100,
-                    '當前價格': price,
+                    '幣別': currency,
+                    '原始單價': raw_price,
+                    '台幣總市值 (TWD)': val_twd,
                     '今日漲跌幅 (%)': daily_chg,
-                    '持有股數': shares,
-                    '持股市值': portfolio_values[t]
+                    '持有股數': shares
                 })
+                
+            # 計算精準的統一幣別權重
+            weights = {t: portfolio_values_twd[t] / total_market_value_twd for t in tickers}
+            for row in latest_rows:
+                row['配置權重 (%)'] = weights[row['代號']] * 100
+                
             df_latest_summary = pd.DataFrame(latest_rows)
             
+            # --- 📊 4. 歷史回測運算 ---
             daily_returns = df_hist_close.pct_change(fill_method=None).fillna(0)
             portfolio_daily_return = pd.Series(0, index=daily_returns.index)
             for t in tickers:
                 portfolio_daily_return += daily_returns[t] * weights[t]
                 
             portfolio_cum_return = (1 + portfolio_daily_return).cumprod() - 1
-            
-            # --- 🛡️ 修復 Bug 的防護罩就在這三行 ---
             df_history_plot = pd.DataFrame({'portfolio_return': portfolio_cum_return})
-            df_history_plot.index.name = 'Date'  # 強制將索引命名為 Date
+            df_history_plot.index.name = 'Date'
             df_history_plot = df_history_plot.reset_index()
-            # --------------------------------------
-            
             df_history_plot['Date'] = df_history_plot['Date'].dt.strftime('%Y-%m-%d')
             
         # ================= 區塊三：大面板數據渲染 =================
         total_return_pct = df_history_plot['portfolio_return'].iloc[-1] * 100
         avg_daily_chg = df_latest_summary['今日漲跌幅 (%)'].mean()
         
+        st.caption(f"💱 系統即時匯率：1 USD = **{usd_to_twd:.2f}** TWD")
+        
         col1, col2, col3 = st.columns(3)
         col1.metric("歷史累積報酬率 (現場回測)", f"{total_return_pct:.2f} %")
         col2.metric("成分股今日平均漲跌", f"{avg_daily_chg:.2f} %")
-        col3.metric("目前資產總市值", f"${total_market_value:,.2f}")
+        col3.metric("目前資產總市值 (台幣)", f"NT$ {total_market_value_twd:,.0f}")
         
         st.markdown("---")
         left_col, right_col = st.columns([2, 1])
@@ -148,10 +160,13 @@ if st.session_state.portfolio:
         st.markdown("---")
         st.subheader("🔍 核心持股最新行情與資產估值")
         
-        st.dataframe(df_latest_summary.style.format({
-            '配置權重 (%)': '{:.1f}%', '當前價格': '${:.2f}', '今日漲跌幅 (%)': '{:+.2f}%',
-            '持有股數': '{:,}', '持股市值': '${:,.2f}'
+        # 重新排版表格讓幣別顯示更清楚
+        display_df = df_latest_summary[['代號', '幣別', '配置權重 (%)', '原始單價', '今日漲跌幅 (%)', '持有股數', '台幣總市值 (TWD)']]
+        
+        st.dataframe(display_df.style.format({
+            '配置權重 (%)': '{:.1f}%', '原始單價': '{:.2f}', '今日漲跌幅 (%)': '{:+.2f}%',
+            '持有股數': '{:,}', '台幣總市值 (TWD)': 'NT$ {:,.0f}'
         }).highlight_max(axis=0, subset=['今日漲跌幅 (%)'], color='#D4EDDA'), use_container_width=True)
         
     except Exception as e:
-        st.error(f"即時處理您的投資組合時發生錯誤（請確認股票代號是否正確，例如美股 NVDA、台股 2330.TW）：{e}")
+        st.error(f"處理投資組合時發生錯誤，請確認代號是否正確：{e}")
