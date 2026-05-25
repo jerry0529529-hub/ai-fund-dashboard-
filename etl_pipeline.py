@@ -4,18 +4,33 @@ import pandas as pd
 from datetime import datetime
 from sqlalchemy import create_engine
 
+# 1. 這裡以後只要輸入你真實的「股數 (shares)」即可
 ASSETS = {
-    '2330.TW': {'name': '台積電', 'weight': 0.20, 'market': 'TW'},
-    '2308.TW': {'name': '台達電', 'weight': 0.10, 'market': 'TW'},
-    '2383.TW': {'name': '台光電', 'weight': 0.10, 'market': 'TW'},
-    '3711.TW': {'name': '日月光投控', 'weight': 0.10, 'market': 'TW'},
-    '3081.TWO': {'name': '聯亞', 'weight': 0.10, 'market': 'TW'},
-    'NVDA': {'name': 'Nvidia', 'weight': 0.20, 'market': 'US'},
-    'COHR': {'name': 'Coherent', 'weight': 0.10, 'market': 'US'},
-    'LITE': {'name': 'Lumentum', 'weight': 0.10, 'market': 'US'},
-    'AMKR': {'name': 'Amkor', 'weight': 0.10, 'market': 'US'}
+    '2887.TW': {'name': '台新新光金', 'shares': 4570, 'market': 'TW'},
+    '6757.TW': {'name': '台灣虎航', 'shares': 1000, 'market': 'TW'},
+    '00679B.TW': {'name': '元大美債20年', 'shares': 2000, 'market': 'TW'},
+    '8069.TWO': {'name': '元太', 'shares': 200, 'market': 'TW'},
+    '1773.TW': {'name': '勝一', 'shares': 100, 'market': 'TW'},
+    '3293.TWO': {'name': '鈊象', 'shares': 20, 'market': 'TW'},
+    '2412.TW': {'name': '中華電', 'shares': 10, 'market': 'TW'}
 }
 
+# 2. 自動將股數轉換為權重的魔法區塊 (讓後續的 ETL 程式不會出錯)
+try:
+    import yfinance as yf
+    tickers = list(ASSETS.keys())
+    # 偷偷去抓今天的最新價格
+    latest_data = yf.download(tickers, period="5d")['Close']
+    latest_prices = latest_data.ffill().iloc[-1]
+    
+    # 計算總市值
+    total_value = sum(ASSETS[t]['shares'] * latest_prices[t] for t in tickers)
+    
+    # 自動算出百分比權重，並補回 ASSETS 字典裡給原程式使用
+    for t in tickers:
+        ASSETS[t]['weight'] = float((ASSETS[t]['shares'] * latest_prices[t]) / total_value)
+except Exception as e:
+    print(f"自動計算權重時發生錯誤: {e}")
 def run_etl():
     print(f"[{datetime.now()}] 啟動 ETL 資料管道...")
     DATABASE_URL = os.environ.get("DATABASE_URL")
