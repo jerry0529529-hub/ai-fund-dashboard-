@@ -5,6 +5,18 @@ import yfinance as yf
 
 st.set_page_config(page_title="實時收益儀表板", layout="wide")
 
+# --- 🌟 新增：自動抓取並記憶公司名稱的快取魔法函數 ---
+@st.cache_data
+def get_company_name(ticker):
+    try:
+        info = yf.Ticker(ticker).info
+        # 優先抓簡稱，沒有就抓全名，如果都抓不到就退回顯示代號
+        name = info.get('shortName') or info.get('longName') or ticker
+        return name
+    except:
+        return ticker
+# ---------------------------------------------------
+
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = {
         '2887.TW': 4570,
@@ -33,7 +45,8 @@ with col_btn:
     if st.button("➕ 新增 / 更新持股配置"):
         if input_ticker:
             st.session_state.portfolio[input_ticker] = input_shares
-            st.toast(f"成功加入 {input_ticker} 共 {input_shares:,} 股！")
+            c_name = get_company_name(input_ticker)
+            st.toast(f"成功加入 {c_name} ({input_ticker}) 共 {input_shares:,} 股！")
             st.rerun()
 
 if st.session_state.portfolio:
@@ -43,7 +56,8 @@ if st.session_state.portfolio:
         cols = st.columns(3)
         for j, (ticker, shares) in enumerate(portfolio_items[i:i+3]):
             with cols[j]:
-                st.write(f"🔹 **{ticker}** : {shares:,} 股")
+                c_name = get_company_name(ticker) # 這裡也會顯示公司名稱
+                st.write(f"🔹 **{c_name}** ({ticker}) : {shares:,} 股")
                 if st.button(f"❌ 刪除 {ticker}", key=f"del_{ticker}"):
                     del st.session_state.portfolio[ticker]
                     st.rerun()
@@ -57,15 +71,12 @@ if st.session_state.portfolio:
     tickers = list(st.session_state.portfolio.keys())
     
     try:
-        with st.spinner("正在同步跨國行情與即時匯率 (USD/TWD)，並進行回測..."):
+        with st.spinner("正在同步跨國行情、擷取公司名稱，並進行回測..."):
             
-            # --- 💱 1. 抓取即時匯率 (修正 Bug：改用嚴謹的 Ticker 語法，確保回傳純數值) ---
             fx_ticker = yf.Ticker("USDTWD=X")
             fx_data = fx_ticker.history(period="5d")
             usd_to_twd = float(fx_data['Close'].iloc[-1])
-            # -------------------------------------------------------------------------
             
-            # --- 📈 2. 抓取股票行情 ---
             raw_latest = yf.download(tickers, period="5d")['Close']
             raw_hist = yf.download(tickers, period="1y")['Close']
             
@@ -82,7 +93,6 @@ if st.session_state.portfolio:
             latest_prices = df_latest_close.iloc[-1].to_dict()
             prev_prices = df_latest_close.iloc[-2].to_dict() if len(df_latest_close) > 1 else latest_prices
             
-            # --- 🧮 3. 跨幣別資產計算引擎 ---
             portfolio_values_twd = {}
             total_market_value_twd = 0
             latest_rows = []
@@ -92,8 +102,8 @@ if st.session_state.portfolio:
                 raw_price = latest_prices[t]
                 prev_price = prev_prices[t]
                 daily_chg = ((raw_price - prev_price) / prev_price) * 100
+                c_name = get_company_name(t) # 取得公司名稱
                 
-                # 自動判斷幣別並換算成台幣
                 if t.endswith('.TW') or t.endswith('.TWO'):
                     currency = "TWD"
                     price_twd = raw_price
@@ -107,6 +117,7 @@ if st.session_state.portfolio:
                 
                 latest_rows.append({
                     '代號': t,
+                    '公司名稱': c_name, # 寫入資料表
                     '幣別': currency,
                     '原始單價': raw_price,
                     '台幣總市值 (TWD)': val_twd,
@@ -120,7 +131,6 @@ if st.session_state.portfolio:
                 
             df_latest_summary = pd.DataFrame(latest_rows)
             
-            # --- 📊 4. 歷史回測運算 ---
             daily_returns = df_hist_close.pct_change(fill_method=None).fillna(0)
             portfolio_daily_return = pd.Series(0, index=daily_returns.index)
             for t in tickers:
@@ -154,14 +164,16 @@ if st.session_state.portfolio:
             
         with right_col:
             st.subheader("🍕 即時戰略資產權重")
-            fig_pie = px.pie(df_latest_summary, values='配置權重 (%)', names='代號', title='即時配置權重比重')
+            # 讓圓餅圖的標籤顯示「公司名稱」
+            fig_pie = px.pie(df_latest_summary, values='配置權重 (%)', names='公司名稱', title='即時配置權重比重')
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
             
         st.markdown("---")
         st.subheader("🔍 核心持股最新行情與資產估值")
         
-        display_df = df_latest_summary[['代號', '幣別', '配置權重 (%)', '原始單價', '今日漲跌幅 (%)', '持有股數', '台幣總市值 (TWD)']]
+        # 將「公司名稱」加入要顯示的表格欄位中
+        display_df = df_latest_summary[['代號', '公司名稱', '幣別', '配置權重 (%)', '原始單價', '今日漲跌幅 (%)', '持有股數', '台幣總市值 (TWD)']]
         
         st.dataframe(display_df.style.format({
             '配置權重 (%)': '{:.1f}%', '原始單價': '{:.2f}', '今日漲跌幅 (%)': '{:+.2f}%',
